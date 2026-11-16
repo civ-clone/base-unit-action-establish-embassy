@@ -2,14 +2,22 @@ import {
   RuleRegistry,
   instance as ruleRegistryInstance,
 } from '@civ-clone/core-rule/RuleRegistry';
+import { CAUGHT_CHECK, ORDINARY } from '@civ-clone/base-unit-agent/lib/escape';
 import Action from '@civ-clone/core-unit/Action';
 import City from '@civ-clone/core-city/City';
 import EmbassyEstablished from './Rules/EmbassyEstablished';
 import Moved from '@civ-clone/core-unit/Rules/Moved';
 import Tile from '@civ-clone/core-world/Tile';
 import Unit from '@civ-clone/core-unit/Unit';
+import { agentSurvives } from '@civ-clone/base-unit-agent/lib/mission';
 
-/** A Diplomat establishes an embassy with `city()`'s owner. What that records is up to the `EmbassyEstablished` rules. The Diplomat is used up when an embassy is established. */
+/**
+ * A Diplomat establishes an embassy with `city()`'s owner. What that records is up to the `EmbassyEstablished` rules.
+ *
+ * Before the mission, the Diplomat must survive a caught check (base-unit-agent's `AgentSurvives` with
+ * `CAUGHT_CHECK`); one that doesn't is destroyed and nothing is established. Once an embassy is established, it is used
+ * up unless it survives an `ORDINARY` check. With no `AgentSurvives` rules, the check passes and it is used up.
+ */
 export class EstablishEmbassy extends Action {
   protected _city: City;
 
@@ -43,9 +51,20 @@ export class EstablishEmbassy extends Action {
   }
 
   perform(): void {
+    const unit = this.unit(),
+      mission = this as unknown as Action;
+
+    if (!agentSurvives(unit, mission, CAUGHT_CHECK, this.ruleRegistry())) {
+      this.ruleRegistry().process(Moved, unit, mission);
+
+      unit.destroy();
+
+      return;
+    }
+
     const results = this.ruleRegistry().process(
       EmbassyEstablished,
-      this.unit(),
+      unit,
       this._city
     );
 
@@ -53,9 +72,11 @@ export class EstablishEmbassy extends Action {
       return;
     }
 
-    this.ruleRegistry().process(Moved, this.unit(), this as unknown as Action);
+    this.ruleRegistry().process(Moved, unit, mission);
 
-    this.unit().destroy();
+    if (!agentSurvives(unit, mission, ORDINARY, this.ruleRegistry())) {
+      unit.destroy();
+    }
   }
 }
 
